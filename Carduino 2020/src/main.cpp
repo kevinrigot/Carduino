@@ -6,7 +6,7 @@
 #include <message.h>
 
 const String APP_NAME = "CArduino 2020 - " __FILE__;
-const String APP_VERSION = "v0.4-" __DATE__ " " __TIME__;
+const String APP_VERSION = "v0.5-" __DATE__ " " __TIME__;
 #define DEBUG 
 
 #ifdef DEBUG
@@ -20,6 +20,9 @@ const String APP_VERSION = "v0.4-" __DATE__ " " __TIME__;
 
 #define ESC_PIN  9
 #define DIRECTION_PIN 10
+#define TURRET_PAN_PIN 6 // horizontal
+#define TURRET_TILT_PIN 5 // Vertical
+
 #define VOLTAGE_1 A0
 #define VOLTAGE_2 A1
 
@@ -31,7 +34,7 @@ const int ESC_BACKWARD_MAX = 30;
 const int ESC_BACKWARD_MIN = 77;
 const int ESC_STOP = 88;
 const int ESC_FORWARD_MIN = 105;
-const int ESC_FORWARD_MAX = 135;
+const int ESC_FORWARD_MAX = 145;
 
 const int PRECISION_Y = 10;
 const int PRECISION_Y_NEG = PRECISION_Y * -1;
@@ -158,6 +161,70 @@ void Servo_calibrate(){
   }
 }
 
+/*******************************************************************************************************************************************************/
+/*          Turret servos: 2* Tower Pro SG90        */
+/* Tension: 4.8V - 6V */
+/*******************************************************************************************************************************************************/
+Servo turretServoPan; //hori
+int posPanTurret = 90;
+const int minPosPanTurret = 5;
+const int maxPosPanTurret = 175;
+const int speedPanTurret = 10;
+
+Servo turretServoTilt; //vert
+int posTiltTurret = 90;
+const int minPosTiltTurret = 20;
+const int maxPosTiltTurret = 160;
+const int speedTiltTurret = 5;
+
+void Turret_setup() {
+  turretServoTilt.attach(TURRET_TILT_PIN);
+  turretServoTilt.write(posTiltTurret);
+  turretServoPan.attach(TURRET_PAN_PIN);
+  turretServoPan.write(posPanTurret);
+}
+
+void Turret_test(){
+  while(true){
+  for(int i = minPosPanTurret; i < maxPosPanTurret; i++){
+    turretServoPan.write(i);
+    delay(10);
+  }
+  for(int i = minPosTiltTurret; i < maxPosTiltTurret; i++){
+    turretServoTilt.write(i);
+    delay(10);
+  }
+  turretServoPan.write(posPanTurret);
+  turretServoTilt.write(posTiltTurret);
+  delay(3000);
+  }
+}
+
+void turnTurret(int joyX, int joyY) {
+  IF_SERIAL_DEBUGS(Serial.print("pos pan:"));
+  IF_SERIAL_DEBUGS(Serial.print(posPanTurret));
+  IF_SERIAL_DEBUGS(Serial.print(" pos tilt:"));
+  IF_SERIAL_DEBUGS(Serial.println(posTiltTurret));
+  
+  //Horizontal
+  if (joyX < -30 && posPanTurret <= maxPosPanTurret-speedPanTurret) {
+    posPanTurret = posPanTurret + map(joyX, 0, -100, 0, speedPanTurret);
+    turretServoPan.write(posPanTurret);
+  } else if (joyX > 30 && posPanTurret >= minPosPanTurret+speedPanTurret) {
+    posPanTurret = posPanTurret - map(joyX, 0, 100, 0, speedPanTurret);
+    turretServoPan.write(posPanTurret);
+  }
+  //Vertical
+  if (joyY < -30 && posTiltTurret <= maxPosTiltTurret-speedTiltTurret) {
+    posTiltTurret = posTiltTurret + map(joyY, 0, -100, 0, speedTiltTurret);
+    turretServoTilt.write(posTiltTurret);
+  } else if (joyY > 30 && posTiltTurret >= minPosTiltTurret+speedTiltTurret) {
+    posTiltTurret = posTiltTurret - map(joyY, 0, 100, 0, speedTiltTurret);;
+    turretServoTilt.write(posTiltTurret);
+  }
+}
+
+
 /*******************************************************************************************************************************************************
           RADIO  - NRF24L01        
 Library: TMRh20/RF24, https://github.com/tmrh20/RF24/ 
@@ -236,20 +303,39 @@ RadioMessageToRemote getVoltageMessage(){
 /*******************************************************************************************************************************************************/
 /*          Carduino       */
 /*******************************************************************************************************************************************************/
+void showDebugMode(){
+  Serial.println("Debug mode");
+  pinMode(LED_BUILTIN, OUTPUT);
+  for(int i =0; i < 2; i++){
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(300);
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(300);
+  }
+  for(int i =0; i < 2; i++){
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(100);
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(100);
+  }
+}
 
 void setup()  {
   Serial.begin(9600);
   Serial.println(APP_NAME);
   Serial.println(APP_VERSION);
+  IF_SERIAL_DEBUGS(showDebugMode());
   Serial.println("Seting up...");
   Radio_setup();
   Motor_setup();
   Servo_setup();
+  Turret_setup();
   
   //Motor_calibrate();
   // Motor_test();
   //Servo_test();
   // Servo_calibrate();
+  //Turret_test();
   printVoltage();
   radio_send(getVoltageMessage());
   Serial.println("Set up done.");
@@ -266,9 +352,13 @@ void loop(){
   if(response.isReceived()){
     radioMessage = response.getRadioMessage();
     String log = "Radio message received: JoyY: ";
-    IF_SERIAL_DEBUGS(Serial.println(log + radioMessage.joystickY+" / JoyX: "+radioMessage.joystickX));
-    turn(radioMessage.joystickX);    
-    move(radioMessage.joystickY);    
+    IF_SERIAL_DEBUGS(Serial.println(log + radioMessage.joystickY+" / JoyX: "+radioMessage.joystickX + " / CamMode: "+ radioMessage.camMode));
+    if(!radioMessage.camMode){
+      turn(radioMessage.joystickX);    
+      move(radioMessage.joystickY);          
+    }else{
+      turnTurret(radioMessage.joystickX, radioMessage.joystickY);
+    }
     if(radioMessage.joystickY == 0 && radioMessage.joystickX == 0){
       noMouvementCounter++;
     }else{

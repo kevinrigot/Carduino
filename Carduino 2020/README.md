@@ -31,3 +31,5 @@ Photos + Schemas
 ![Breadboard](schemas/CarDuino2020_bb.png?raw=true "Breadboard")
 ![Photo2](schemas/Photo1.jpg?raw=true "Photo1")
 ![Photo2](schemas/Photo2.jpg?raw=true "Photo2")
+![Photov0.5](schemas/Photov0.5.jpg?raw=true "Photov0.5")
+![exp32-cam](schemas/exp32-cam.jpg?raw=true "exp32-cam")

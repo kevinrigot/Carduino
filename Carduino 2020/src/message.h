@@ -2,6 +2,7 @@ typedef struct RadioMessage
 {
     int joystickX;
     int joystickY;
+    boolean camMode;
 };
 
 class RadioMessageResponse{

@@ -7,7 +7,7 @@
 #include <LiquidCrystal_I2C.h>
 
 const String APP_NAME = "CArduino Remote 2020 - " __FILE__;
-const String APP_VERSION = "v0.4-" __DATE__ " " __TIME__;
+const String APP_VERSION = "v0.5-" __DATE__ " " __TIME__;
 //#define DEBUG 
 
 #ifdef DEBUG
@@ -20,8 +20,10 @@ const String APP_VERSION = "v0.4-" __DATE__ " " __TIME__;
 /*          PIN LAYOUT        */
 /*******************************************************************************************************************************************************/
 
-const int JOY_Y_PIN = A0;
-const int JOY_X_PIN = A1;
+#define JOY_Y_PIN A0
+#define JOY_X_PIN A2
+#define JOY_X_Y_PIN A1
+#define JOY_X_PUSH_PIN A3
 
 //SCL - A5
 //SDA - A4
@@ -115,7 +117,7 @@ void radio_send(RadioMessage msg){
 }
 
 /*******************************************************************************************************************************************************/
-/*          Joystick - 2 potentiometer        */
+/*          Joystick - 3 potentiometer + 1 push        */
 /*******************************************************************************************************************************************************/
 void calibrate();
 void setup_joystick();
@@ -127,29 +129,46 @@ int MAX_UP = 232;
 int MAX_DOWN = 524;
 const int MAX_ANGLE = 300;
 const int ADJUSTER = 4;
-int ADJUSTED_MAX_LEFT = MAX_LEFT+ADJUSTER;
-int ADJUSTED_MAX_RIGHT = MAX_RIGHT-ADJUSTER;
 int ADJUSTED_MAX_UP = MAX_UP-ADJUSTER;
 int ADJUSTED_MAX_DOWN = MAX_DOWN+ADJUSTER;
 const int CALIBRATION_TIMEOUT = 3000;
+
+
 
 void setup_joystick(){
   Serial.println("Setting up Joysticks...");
   pinMode(JOY_Y_PIN, INPUT);
   pinMode(JOY_X_PIN, INPUT);
+  pinMode(JOY_X_Y_PIN, INPUT);
+  pinMode(JOY_X_PUSH_PIN, INPUT_PULLUP);
 
-  int middleX = analogRead(JOY_X_PIN);
-  MAX_LEFT = middleX - (MAX_ANGLE/2);
-  MAX_RIGHT = middleX + (MAX_ANGLE/2);
   int middleY = analogRead(JOY_Y_PIN);
   MAX_UP = middleY - (MAX_ANGLE/2);
   MAX_DOWN = middleY + (MAX_ANGLE/2);
 
-  ADJUSTED_MAX_LEFT = MAX_LEFT+ADJUSTER;
-  ADJUSTED_MAX_RIGHT = MAX_RIGHT-ADJUSTER;
   ADJUSTED_MAX_UP = MAX_UP-ADJUSTER;
   ADJUSTED_MAX_DOWN = MAX_DOWN+ADJUSTER;
 
+}
+
+boolean camMode = false;
+unsigned long camMode_previousMillis = 0; 
+boolean camMode_debounce = false;
+const long camMode_debounce_interval = 2000; 
+// TODO change it to interrupt
+int readCamModeAndDebounce(boolean camMode){
+  if(!camMode_debounce || (millis() - camMode_previousMillis >= camMode_debounce_interval)){
+    camMode_debounce = false;
+    int val = digitalRead(JOY_X_PUSH_PIN);
+    if(val == LOW){ // Pullup
+      IF_SERIAL_DEBUGS(Serial.print("Cam mode "));
+      IF_SERIAL_DEBUGS(Serial.println(camMode ? "activated" : "deactivated"));
+      camMode = !camMode;
+      camMode_previousMillis = millis();
+      camMode_debounce = true;
+    }
+  }
+  return camMode;  
 }
 
 const int PRECISION_X = 5;
@@ -157,17 +176,35 @@ const int PRECISION_X_NEG = PRECISION_X * -1;
 const int PRECISION_Y = 10;
 const int PRECISION_Y_NEG = PRECISION_Y * -1;
 
+int ADJUSTED_MAX_LEFT = 1019;
+int ADJUSTED_MAX_RIGHT = 4;
 void readJoystick(RadioMessage * joysticks){
+  camMode = readCamModeAndDebounce(camMode);
+  joysticks->camMode = camMode;
 
-  joysticks->joystickX = map(analogRead(JOY_X_PIN), ADJUSTED_MAX_LEFT, ADJUSTED_MAX_RIGHT, PRECISION_X_NEG, PRECISION_X);
-  joysticks->joystickY = map(analogRead(JOY_Y_PIN), ADJUSTED_MAX_UP, ADJUSTED_MAX_DOWN, PRECISION_Y, PRECISION_Y_NEG); 
-  if(abs(joysticks->joystickX) == 1)joysticks->joystickX = 0;
-  if(joysticks->joystickX > PRECISION_X)joysticks->joystickX = PRECISION_X;
-  if(joysticks->joystickX < PRECISION_X_NEG)joysticks->joystickX = PRECISION_X_NEG;
-  if(abs(joysticks->joystickY) == 1)joysticks->joystickY = 0;
-  if(joysticks->joystickY > PRECISION_Y)joysticks->joystickY = PRECISION_Y;
-  if(joysticks->joystickY < PRECISION_Y_NEG)joysticks->joystickY = PRECISION_Y_NEG;
+  if(camMode){
+    joysticks->joystickX = map(analogRead(JOY_X_PIN), ADJUSTED_MAX_RIGHT, ADJUSTED_MAX_LEFT, -100, 100);
+    if(abs(joysticks->joystickX) <= 5)joysticks->joystickX = 0;
+    if(joysticks->joystickX > 100)joysticks->joystickX = 100;
+    if(joysticks->joystickX < -100)joysticks->joystickX = -100;
 
+    // read right joystick Y axis
+    joysticks->joystickY = map(analogRead(JOY_X_Y_PIN), ADJUSTED_MAX_RIGHT, ADJUSTED_MAX_LEFT, -100, 100);
+    if(abs(joysticks->joystickY) <= 5)joysticks->joystickY = 0;
+    if(joysticks->joystickY > 100)joysticks->joystickY = 100;
+    if(joysticks->joystickY < -100)joysticks->joystickY = -100;
+  }else{
+    joysticks->joystickX = map(analogRead(JOY_X_PIN), ADJUSTED_MAX_RIGHT, ADJUSTED_MAX_LEFT, PRECISION_X_NEG, PRECISION_X);
+    if(abs(joysticks->joystickX) <= 1)joysticks->joystickX = 0;
+    if(joysticks->joystickX > PRECISION_X)joysticks->joystickX = PRECISION_X;
+    if(joysticks->joystickX < PRECISION_X_NEG)joysticks->joystickX = PRECISION_X_NEG;
+
+    joysticks->joystickY = map(analogRead(JOY_Y_PIN), ADJUSTED_MAX_UP, ADJUSTED_MAX_DOWN, PRECISION_Y, PRECISION_Y_NEG); 
+    if(abs(joysticks->joystickY) <= 1)joysticks->joystickY = 0;
+    if(joysticks->joystickY > PRECISION_Y)joysticks->joystickY = PRECISION_Y;
+    if(joysticks->joystickY < PRECISION_Y_NEG)joysticks->joystickY = PRECISION_Y_NEG;
+  }
+  
   /*IF_SERIAL_DEBUGS(Serial.print("X:"));
   IF_SERIAL_DEBUGS(Serial.print(joysticks->joystickX));
   IF_SERIAL_DEBUGS(Serial.print(" Y:"));
@@ -195,7 +232,6 @@ void setup()
 }
 RadioMessage msg;
 RadioMessage prevMsg;
-RadioMessage joysticks;
 
 unsigned long previousMillis = 0;  // will store last time LED was updated
 const long interval = 1000;  // interval at which to blink (milliseconds)
@@ -204,23 +240,26 @@ void loop()
 {
   unsigned long currentMillis = millis();
   radio_listen();
-  readJoystick(&joysticks);
+  readJoystick(&msg);
 
-  msg.joystickX = joysticks.joystickX;
-  msg.joystickY = joysticks.joystickY;
-  if(msg.joystickY != prevMsg.joystickY || msg.joystickX != prevMsg.joystickX){ 
+  if(msg.joystickY != prevMsg.joystickY || msg.joystickX != prevMsg.joystickX || msg.camMode != prevMsg.camMode){ 
     nbIdenticalMessage = 0;
   }
   if(nbIdenticalMessage < 5){  
     radio_send(msg);
     prevMsg.joystickY = msg.joystickY;
     prevMsg.joystickX = msg.joystickX;
+    prevMsg.camMode = msg.camMode;
+
     lcd.setCursor(0, 1);
-    lcd.print(joysticks.joystickX);  
+    lcd.print(msg.camMode ? "CAM " : "DRV ");
+    lcd.setCursor(4, 1);
+    lcd.print(msg.joystickY);  
     lcd.print("   ");  
-    lcd.setCursor(8, 1);
-    lcd.print(joysticks.joystickY);
-    lcd.print("   ");  
+    lcd.setCursor(9, 1);
+    lcd.print(msg.joystickX);
+    lcd.print("   "); 
+    
     previousMillis = currentMillis;
     nbIdenticalMessage++;
   }else {
